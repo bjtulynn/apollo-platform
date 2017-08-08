@@ -109,6 +109,7 @@ private:
   mutable std::mutex mutex_;
   bool started_;
   boost::interprocess::interprocess_mutex shm_sub_mutex_;
+  std::map<std::string, bool> shm_skip_first_msg_;
 };
 
 }

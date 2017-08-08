@@ -173,6 +173,18 @@ void ShmManager::threadFunc()
 
             shm_map_[topic] = item;
           }
+
+          if (shm_skip_first_msg_.find(topic) == shm_skip_first_msg_.end())
+          {
+            if (segment == NULL)
+            {
+              shm_skip_first_msg_[topic] = false;
+            }
+            else
+            {
+              shm_skip_first_msg_[topic] = true;
+            }
+          }
         }
       }
 
@@ -192,40 +204,55 @@ void ShmManager::threadFunc()
               bool exit = false;
               int32_t read_index = -1;
               bool is_new_msg = false;
-              int32_t msg_index ;
-              uint32_t msg_size ;
               M_stringPtr header_ptr(new M_string());
+              ros::VoidConstPtr msg;
+              SerializedMessage m;
+
+              (*header_ptr)["topic"] = shm_map_[topic].topic_name;
+              (*header_ptr)["md5sum"] = shm_map_[topic].md5sum;
+              (*header_ptr)["message_definition"] = shm_map_[topic].message_definition;
+              (*header_ptr)["callerid"] = shm_map_[topic].callerid;
+              (*header_ptr)["type"] = shm_map_[topic].datatype;
 
               while (!exit && started_ && ros::ok()) 
               {
                 {
-                  is_new_msg = shm_map_[topic].segment_mgr->read_data(read_index, 
-                    shm_map_[topic].descriptors_sub, topic, msg_index, msg_size);
+                  if (!((shm_map_[topic].shm_sub_ptr)->get_helper()))
+                  {
+                    continue;
+                  }
+
+                  is_new_msg = shm_map_[topic].segment_mgr->read_data(msg, read_index,
+                    shm_map_[topic].descriptors_sub, shm_map_[topic].addr_sub,
+                    (shm_map_[topic].shm_sub_ptr)->get_helper(), topic, header_ptr);
 
                   // Block needs to be allocated
-                  if (read_index == sharedmem_transport::ROS_SHM_SEGMENT_WROTE_NUM)
+                  if (read_index == sharedmem_transport::ROS_SHM_SEGMENT_WROTE_NUM ||
+                    shm_map_[topic].shm_sub_ptr->get_publisher_links().size() == 0)
                   {
                     if (shm_map_[topic].addr_sub)
                     {
                       delete [](shm_map_[topic].addr_sub);
                     }
                     shm_map_.erase(topic);
+                    shm_skip_first_msg_.erase(topic);
+                    is_new_msg = false;
                     exit = true;
                   }
 
                   // New message is coming
-                  if (is_new_msg && msg_size != 0) 
+                  if (is_new_msg)
                   {
-                    (*header_ptr)["topic"] = shm_map_[topic].topic_name;
-                    (*header_ptr)["md5sum"] = shm_map_[topic].md5sum;
-                    (*header_ptr)["message_definition"] = shm_map_[topic].message_definition;
-                    (*header_ptr)["callerid"] = shm_map_[topic].callerid;
-                    (*header_ptr)["type"] = shm_map_[topic].datatype;
-                    boost::shared_array<uint8_t> buffer(shm_map_[topic].addr_sub[msg_index], 
-                      [](uint8_t * buffer) { return buffer; });
+                    if (shm_skip_first_msg_[topic] == true)
+                    {
+                      // Skip first message
+                      shm_skip_first_msg_[topic] = false;
+                      continue;
+                    }
 
-                    shm_map_[topic].shm_sub_ptr->handleMessage(msg_index, SerializedMessage(buffer, msg_size), 
-                      true, true, header_ptr);                        
+                    m.message = msg;
+                    m.type_info = &((shm_map_[topic].shm_sub_ptr)->get_helper()->getTypeInfo());
+                    shm_map_[topic].shm_sub_ptr->handleMessage(m, false, true, header_ptr, NULL);
                   }
                 }
               }
