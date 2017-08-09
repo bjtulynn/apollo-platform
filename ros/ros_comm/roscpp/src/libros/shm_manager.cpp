@@ -126,7 +126,8 @@ void ShmManager::threadFunc()
 
           if (g_config_comm.topic_white_list.find(topic) != 
             g_config_comm.topic_white_list.end() || 
-            shm_map_.find(topic) != shm_map_.end())
+            shm_map_.find(topic) != shm_map_.end() ||
+            (*it)->get_publisher_links().size() == 0)
           {
             continue;
           }
